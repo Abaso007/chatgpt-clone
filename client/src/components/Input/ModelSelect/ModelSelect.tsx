@@ -1,14 +1,7 @@
-import React from 'react';
-import OpenAI from './OpenAI';
-import BingAI from './BingAI';
-import Google from './Google';
-import Plugins from './Plugins';
-import ChatGPT from './ChatGPT';
-import Anthropic from './Anthropic';
-import { useRecoilValue } from 'recoil';
+import { useGetModelsQuery } from 'librechat-data-provider/react-query';
 import type { TConversation } from 'librechat-data-provider';
-import type { TSetOption, TModelSelectProps } from '~/common';
-import store from '~/store';
+import type { TSetOption } from '~/common';
+import { multiChatOptions } from './options';
 
 type TGoogleProps = {
   showExamples: boolean;
@@ -19,31 +12,39 @@ type TSelectProps = {
   conversation: TConversation | null;
   setOption: TSetOption;
   extraProps?: TGoogleProps;
+  showAbove?: boolean;
+  popover?: boolean;
 };
 
-const optionComponents: { [key: string]: React.FC<TModelSelectProps> } = {
-  openAI: OpenAI,
-  azureOpenAI: OpenAI,
-  bingAI: BingAI,
-  google: Google,
-  gptPlugins: Plugins,
-  anthropic: Anthropic,
-  chatGPTBrowser: ChatGPT,
-};
+export default function ModelSelect({
+  conversation,
+  setOption,
+  popover = false,
+  showAbove = true,
+}: TSelectProps) {
+  const modelsQuery = useGetModelsQuery();
 
-export default function ModelSelect({ conversation, setOption }: TSelectProps) {
-  const modelsConfig = useRecoilValue(store.modelsConfig);
   if (!conversation?.endpoint) {
     return null;
   }
 
-  const { endpoint } = conversation;
-  const OptionComponent = optionComponents[endpoint];
-  const models = modelsConfig?.[endpoint] ?? [];
+  const { endpoint: _endpoint, endpointType } = conversation;
+  const models = modelsQuery?.data?.[_endpoint] ?? [];
+  const endpoint = endpointType ?? _endpoint;
+
+  const OptionComponent = multiChatOptions[endpoint];
 
   if (!OptionComponent) {
     return null;
   }
 
-  return <OptionComponent conversation={conversation} setOption={setOption} models={models} />;
+  return (
+    <OptionComponent
+      conversation={conversation}
+      setOption={setOption}
+      models={models}
+      showAbove={showAbove}
+      popover={popover}
+    />
+  );
 }

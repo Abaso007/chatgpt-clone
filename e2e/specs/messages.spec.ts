@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Response, Page, BrowserContext } from '@playwright/test';
 
-const basePath = 'http://localhost:3080/chat/';
+const basePath = 'http://localhost:3080/c/';
 const initialUrl = `${basePath}new`;
 const endpoints = ['google', 'openAI', 'azureOpenAI', 'bingAI', 'chatGPTBrowser', 'gptPlugins'];
 const endpoint = endpoints[1];
@@ -36,14 +36,6 @@ test.beforeAll(async ({ browser }) => {
   const page = await beforeAfterAllContext.newPage();
   await clearConvos(page);
   await page.close();
-});
-
-test.afterAll(async () => {
-  console.log('🤖: clearing conversations after message tests.');
-  const page = await beforeAfterAllContext.newPage();
-  await clearConvos(page);
-  await page.close();
-  await beforeAfterAllContext.close();
 });
 
 test.beforeEach(async ({ page }) => {
@@ -86,7 +78,7 @@ test.describe('Messaging suite', () => {
     expect(currentUrl).toBe(initialUrl);
 
     //cleanup the conversation
-    await page.getByText('New chat', { exact: true }).click();
+    await page.getByTestId('nav-new-chat-button').click();
     expect(page.url()).toBe(initialUrl);
 
     // Click on the first conversation
@@ -166,7 +158,7 @@ test.describe('Messaging suite', () => {
     const currentUrl = page.url();
     const conversationId = currentUrl.split(basePath).pop() ?? '';
     expect(isUUID(conversationId)).toBeTruthy();
-    await page.getByText('New chat', { exact: true }).click();
+    await page.getByTestId('nav-new-chat-button').click();
     expect(page.url()).toBe(initialUrl);
   });
 });

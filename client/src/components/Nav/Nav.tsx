@@ -1,169 +1,126 @@
+import { useCallback, useEffect, useState, useMemo, memo } from 'react';
+import { useRecoilValue } from 'recoil';
+import { PermissionTypes, Permissions } from 'librechat-data-provider';
+import type { ConversationListResponse } from 'librechat-data-provider';
 import {
-  TConversation,
-  useGetConversationsQuery,
-  useSearchQuery,
-  TSearchResults,
-} from 'librechat-data-provider';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRecoilValue, useSetRecoilState } from 'recoil';
-import NewChat from './NewChat';
-import SearchBar from './SearchBar';
-import NavLinks from './NavLinks';
-import { Panel, Spinner } from '~/components';
-import { Conversations, Pages } from '../Conversations';
-import {
-  useAuthContext,
-  useDebounce,
-  useMediaQuery,
   useLocalize,
-  useConversation,
-  useConversations,
+  useHasAccess,
+  useMediaQuery,
+  useAuthContext,
+  useLocalStorage,
+  useNavScrolling,
 } from '~/hooks';
-import { cn } from '~/utils/';
+import { useConversationsInfiniteQuery } from '~/data-provider';
+import { Conversations } from '~/components/Conversations';
+import BookmarkNav from './Bookmarks/BookmarkNav';
+import AccountSettings from './AccountSettings';
+import { useSearchContext } from '~/Providers';
+import { Spinner } from '~/components/svg';
+import SearchBar from './SearchBar';
+import NavToggle from './NavToggle';
+import NewChat from './NewChat';
+import { cn } from '~/utils';
 import store from '~/store';
 
-export default function Nav({ navVisible, setNavVisible }) {
-  const [isHovering, setIsHovering] = useState(false);
-  const [navWidth, setNavWidth] = useState('260px');
-  const { isAuthenticated } = useAuthContext();
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const scrollPositionRef = useRef<number | null>(null);
+const Nav = ({
+  navVisible,
+  setNavVisible,
+}: {
+  navVisible: boolean;
+  setNavVisible: React.Dispatch<React.SetStateAction<boolean>>;
+}) => {
   const localize = useLocalize();
+  const { isAuthenticated } = useAuthContext();
+
+  const [navWidth, setNavWidth] = useState('260px');
+  const [isHovering, setIsHovering] = useState(false);
   const isSmallScreen = useMediaQuery('(max-width: 768px)');
+  const [newUser, setNewUser] = useLocalStorage('newUser', true);
+  const [isToggleHovering, setIsToggleHovering] = useState(false);
+
+  const hasAccessToBookmarks = useHasAccess({
+    permissionType: PermissionTypes.BOOKMARKS,
+    permission: Permissions.USE,
+  });
+
+  const handleMouseEnter = useCallback(() => {
+    setIsHovering(true);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    setIsHovering(false);
+  }, []);
 
   useEffect(() => {
     if (isSmallScreen) {
+      const savedNavVisible = localStorage.getItem('navVisible');
+      if (savedNavVisible === null) {
+        toggleNavVisible();
+      }
       setNavWidth('320px');
     } else {
       setNavWidth('260px');
     }
   }, [isSmallScreen]);
 
-  const [conversations, setConversations] = useState<TConversation[]>([]);
-  // current page
-  const [pageNumber, setPageNumber] = useState(1);
-  // total pages
-  const [pages, setPages] = useState(1);
-
-  // data provider
-  const getConversationsQuery = useGetConversationsQuery(pageNumber + '', {
-    enabled: isAuthenticated,
-  });
-
-  // search
-  const searchQuery = useRecoilValue(store.searchQuery);
+  const [showLoading, setShowLoading] = useState(false);
   const isSearchEnabled = useRecoilValue(store.isSearchEnabled);
-  const isSearching = useRecoilValue(store.isSearching);
-  const { newConversation, searchPlaceholderConversation } = useConversation();
 
-  // current conversation
-  const conversation = useRecoilValue(store.conversation);
-  const { conversationId } = conversation || {};
-  const setSearchResultMessages = useSetRecoilState(store.searchResultMessages);
-  const refreshConversationsHint = useRecoilValue(store.refreshConversationsHint);
-  const { refreshConversations } = useConversations();
-
-  const [isFetching, setIsFetching] = useState(false);
-
-  const debouncedSearchTerm = useDebounce(searchQuery, 750);
-  const searchQueryFn = useSearchQuery(debouncedSearchTerm, pageNumber + '', {
-    enabled: !!(
-      !!debouncedSearchTerm &&
-      debouncedSearchTerm.length > 0 &&
-      isSearchEnabled &&
-      isSearching
-    ),
+  const { pageNumber, searchQuery, setPageNumber, searchQueryRes } = useSearchContext();
+  const [tags, setTags] = useState<string[]>([]);
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, refetch } =
+    useConversationsInfiniteQuery(
+      {
+        pageNumber: pageNumber.toString(),
+        isArchived: false,
+        tags: tags.length === 0 ? undefined : tags,
+      },
+      { enabled: isAuthenticated },
+    );
+  useEffect(() => {
+    // When a tag is selected, refetch the list of conversations related to that tag
+    refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tags]);
+  const { containerRef, moveToTop } = useNavScrolling<ConversationListResponse>({
+    setShowLoading,
+    hasNextPage: searchQuery ? searchQueryRes?.hasNextPage : hasNextPage,
+    fetchNextPage: searchQuery ? searchQueryRes?.fetchNextPage : fetchNextPage,
+    isFetchingNextPage: searchQuery
+      ? searchQueryRes?.isFetchingNextPage ?? false
+      : isFetchingNextPage,
   });
 
-  const onSearchSuccess = useCallback((data: TSearchResults, expectedPage?: number) => {
-    const res = data;
-    setConversations(res.conversations);
-    if (expectedPage) {
-      setPageNumber(expectedPage);
-    }
-    setPages(Number(res.pages));
-    setIsFetching(false);
-    searchPlaceholderConversation();
-    setSearchResultMessages(res.messages);
-    /* disabled due recoil methods not recognized as state setters */
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency array
-
-  useEffect(() => {
-    //we use isInitialLoading here instead of isLoading because query is disabled by default
-    if (searchQueryFn.isInitialLoading) {
-      setIsFetching(true);
-    } else if (searchQueryFn.data) {
-      onSearchSuccess(searchQueryFn.data);
-    }
-  }, [searchQueryFn.data, searchQueryFn.isInitialLoading, onSearchSuccess]);
-
-  const clearSearch = () => {
-    setPageNumber(1);
-    refreshConversations();
-    if (conversationId == 'search') {
-      newConversation();
-    }
-  };
-
-  const moveToTop = useCallback(() => {
-    const container = containerRef.current;
-    if (container) {
-      scrollPositionRef.current = container.scrollTop;
-    }
-  }, [containerRef, scrollPositionRef]);
-
-  const nextPage = async () => {
-    moveToTop();
-    setPageNumber(pageNumber + 1);
-  };
-
-  const previousPage = async () => {
-    moveToTop();
-    setPageNumber(pageNumber - 1);
-  };
-
-  useEffect(() => {
-    if (getConversationsQuery.data) {
-      if (isSearching) {
-        return;
-      }
-      let { conversations, pages } = getConversationsQuery.data;
-      pages = Number(pages);
-      if (pageNumber > pages) {
-        setPageNumber(pages);
-      } else {
-        if (!isSearching) {
-          conversations = conversations.sort(
-            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-          );
-        }
-        setConversations(conversations);
-        setPages(pages);
-      }
-    }
-  }, [getConversationsQuery.isSuccess, getConversationsQuery.data, isSearching, pageNumber]);
-
-  useEffect(() => {
-    if (!isSearching) {
-      getConversationsQuery.refetch();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageNumber, conversationId, refreshConversationsHint]);
+  const conversations = useMemo(
+    () =>
+      (searchQuery ? searchQueryRes?.data : data)?.pages.flatMap((page) => page.conversations) ||
+      [],
+    [data, searchQuery, searchQueryRes?.data],
+  );
 
   const toggleNavVisible = () => {
-    setNavVisible((prev: boolean) => !prev);
+    setNavVisible((prev: boolean) => {
+      localStorage.setItem('navVisible', JSON.stringify(!prev));
+      return !prev;
+    });
+    if (newUser) {
+      setNewUser(false);
+    }
   };
 
-  const containerClasses =
-    getConversationsQuery.isLoading && pageNumber === 1
-      ? 'flex flex-col gap-2 text-gray-100 text-sm h-full justify-center items-center'
-      : 'flex flex-col gap-2 text-gray-100 text-sm';
+  const itemToggleNav = () => {
+    if (isSmallScreen) {
+      toggleNavVisible();
+    }
+  };
 
   return (
     <>
       <div
-        className="nav active dark max-w-[320px] flex-shrink-0 overflow-x-hidden bg-gray-900 md:max-w-[260px]"
+        data-testid="nav"
+        className={
+          'nav active max-w-[320px] flex-shrink-0 overflow-x-hidden bg-surface-primary-alt md:max-w-[260px]'
+        }
         style={{
           width: navVisible ? navWidth : '0px',
           visibility: navVisible ? 'visible' : 'hidden',
@@ -171,68 +128,97 @@ export default function Nav({ navVisible, setNavVisible }) {
         }}
       >
         <div className="h-full w-[320px] md:w-[260px]">
-          <div className="flex h-full min-h-0 flex-col ">
-            <div className="scrollbar-trigger relative flex h-full w-full flex-1 items-start border-white/20">
-              <nav className="relative flex h-full flex-1 flex-col space-y-1 p-2">
-                <div className="mb-1 flex h-11 flex-row">
-                  <NewChat />
-                  <button
-                    type="button"
-                    className={cn(
-                      'nav-close-button inline-flex h-11 w-11 items-center justify-center rounded-md border border-white/20 text-white hover:bg-gray-500/10',
-                    )}
-                    onClick={toggleNavVisible}
-                  >
-                    <span className="sr-only">{localize('com_nav_close_sidebar')}</span>
-                    <Panel open={false} />
-                  </button>
-                </div>
-                {isSearchEnabled && <SearchBar clearSearch={clearSearch} />}
-                <div
-                  className={`flex-1 flex-col overflow-y-auto ${
-                    isHovering ? '' : 'scrollbar-transparent'
-                  } border-b border-white/20`}
-                  onMouseEnter={() => setIsHovering(true)}
-                  onMouseLeave={() => setIsHovering(false)}
-                  ref={containerRef}
+          <div className="flex h-full min-h-0 flex-col">
+            <div
+              className={cn(
+                'flex h-full min-h-0 flex-col transition-opacity',
+                isToggleHovering && !isSmallScreen ? 'opacity-50' : 'opacity-100',
+              )}
+            >
+              <div
+                className={cn(
+                  'scrollbar-trigger relative h-full w-full flex-1 items-start border-white/20',
+                )}
+              >
+                <nav
+                  id="chat-history-nav"
+                  aria-label={localize('com_ui_chat_history')}
+                  className="flex h-full w-full flex-col px-3 pb-3.5"
                 >
-                  <div className={containerClasses}>
-                    {(getConversationsQuery.isLoading && pageNumber === 1) || isFetching ? (
-                      <Spinner />
-                    ) : (
-                      <Conversations conversations={conversations} moveToTop={moveToTop} />
+                  <div
+                    className={cn(
+                      '-mr-2 flex-1 flex-col overflow-y-auto pr-2 transition-opacity duration-500',
+                      isHovering ? '' : 'scrollbar-transparent',
                     )}
-                    <Pages
-                      pageNumber={pageNumber}
-                      pages={pages}
-                      nextPage={nextPage}
-                      previousPage={previousPage}
-                      setPageNumber={setPageNumber}
+                    onMouseEnter={handleMouseEnter}
+                    onMouseLeave={handleMouseLeave}
+                    ref={containerRef}
+                  >
+                    <NewChat
+                      toggleNav={itemToggleNav}
+                      isSmallScreen={isSmallScreen}
+                      subHeaders={
+                        <>
+                          {isSearchEnabled === true && (
+                            <SearchBar
+                              setPageNumber={setPageNumber}
+                              isSmallScreen={isSmallScreen}
+                            />
+                          )}
+                          {hasAccessToBookmarks === true && (
+                            <>
+                              <div className="mt-1.5" />
+                              <BookmarkNav
+                                tags={tags}
+                                setTags={setTags}
+                                isSmallScreen={isSmallScreen}
+                              />
+                            </>
+                          )}
+                        </>
+                      }
                     />
+
+                    <Conversations
+                      conversations={conversations}
+                      moveToTop={moveToTop}
+                      toggleNav={itemToggleNav}
+                    />
+                    {(isFetchingNextPage || showLoading) && (
+                      <Spinner className={cn('m-1 mx-auto mb-4 h-4 w-4 text-text-primary')} />
+                    )}
                   </div>
-                </div>
-                <NavLinks />
-              </nav>
+                  <AccountSettings />
+                </nav>
+              </div>
             </div>
           </div>
         </div>
       </div>
-      {!navVisible && (
-        <div className="absolute left-2 top-2 z-10 hidden md:inline-block">
-          <button
-            type="button"
-            className="nav-open-button flex h-11 cursor-pointer items-center gap-3 rounded-md border border-black/10 bg-white p-3 text-sm text-black transition-colors duration-200 hover:bg-gray-50 dark:border-white/20 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-            onClick={toggleNavVisible}
-          >
-            <div className="flex items-center justify-center">
-              <span className="sr-only">{localize('com_nav_open_sidebar')}</span>
-              <Panel open={true} />
-            </div>
-          </button>
-        </div>
+      <NavToggle
+        isHovering={isToggleHovering}
+        setIsHovering={setIsToggleHovering}
+        onToggle={toggleNavVisible}
+        navVisible={navVisible}
+        className="fixed left-0 top-1/2 z-40 hidden md:flex"
+      />
+      {isSmallScreen && (
+        <div
+          id="mobile-nav-mask-toggle"
+          role="button"
+          tabIndex={0}
+          className={`nav-mask ${navVisible ? 'active' : ''}`}
+          onClick={toggleNavVisible}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              toggleNavVisible();
+            }
+          }}
+          aria-label="Toggle navigation"
+        />
       )}
-
-      <div className={'nav-mask' + (navVisible ? ' active' : '')} onClick={toggleNavVisible}></div>
     </>
   );
-}
+};
+
+export default memo(Nav);

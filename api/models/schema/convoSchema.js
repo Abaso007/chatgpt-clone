@@ -18,36 +18,40 @@ const convoSchema = mongoose.Schema(
     user: {
       type: String,
       index: true,
-      default: null,
     },
     messages: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Message' }],
     // google only
-    examples: [{ type: mongoose.Schema.Types.Mixed }],
+    examples: { type: [{ type: mongoose.Schema.Types.Mixed }], default: undefined },
     agentOptions: {
       type: mongoose.Schema.Types.Mixed,
-      default: null,
     },
     ...conversationPreset,
+    agent_id: {
+      type: String,
+    },
     // for bingAI only
     bingConversationId: {
       type: String,
-      default: null,
     },
     jailbreakConversationId: {
       type: String,
-      default: null,
     },
     conversationSignature: {
       type: String,
-      default: null,
     },
     clientId: {
       type: String,
-      default: null,
     },
     invocationId: {
       type: Number,
-      default: 1,
+    },
+    tags: {
+      type: [String],
+      default: [],
+      meiliIndex: true,
+    },
+    files: {
+      type: [String],
     },
   },
   { timestamps: true },
@@ -62,7 +66,8 @@ if (process.env.MEILI_HOST && process.env.MEILI_MASTER_KEY) {
   });
 }
 
-convoSchema.index({ createdAt: 1 });
+convoSchema.index({ createdAt: 1, updatedAt: 1 });
+convoSchema.index({ conversationId: 1, user: 1 }, { unique: true });
 
 const Conversation = mongoose.models.Conversation || mongoose.model('Conversation', convoSchema);
 

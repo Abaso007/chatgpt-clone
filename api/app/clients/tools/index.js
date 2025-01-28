@@ -1,39 +1,24 @@
-const GoogleSearchAPI = require('./GoogleSearch');
-const HttpRequestTool = require('./HttpRequestTool');
-const AIPluginTool = require('./AIPluginTool');
-const OpenAICreateImage = require('./DALL-E');
-const StructuredSD = require('./structured/StableDiffusion');
-const StableDiffusionAPI = require('./StableDiffusion');
-const WolframAlphaAPI = require('./Wolfram');
-const StructuredWolfram = require('./structured/Wolfram');
-const SelfReflectionTool = require('./SelfReflection');
-const AzureCognitiveSearch = require('./AzureCognitiveSearch');
-const StructuredACS = require('./structured/AzureCognitiveSearch');
-const ChatTool = require('./structured/ChatTool');
-const E2BTools = require('./structured/E2BTools');
-const CodeSherpa = require('./structured/CodeSherpa');
-const CodeSherpaTools = require('./structured/CodeSherpaTools');
 const availableTools = require('./manifest.json');
-const CodeInterpreter = require('./CodeInterpreter');
-const CodeBrew = require('./CodeBrew');
+
+// Structured Tools
+const DALLE3 = require('./structured/DALLE3');
+const StructuredWolfram = require('./structured/Wolfram');
+const StructuredACS = require('./structured/AzureAISearch');
+const StructuredSD = require('./structured/StableDiffusion');
+const GoogleSearchAPI = require('./structured/GoogleSearch');
+const TraversaalSearch = require('./structured/TraversaalSearch');
+const TavilySearchResults = require('./structured/TavilySearchResults');
+const OpenWeather = require('./structured/OpenWeather');
 
 module.exports = {
   availableTools,
-  GoogleSearchAPI,
-  HttpRequestTool,
-  AIPluginTool,
-  OpenAICreateImage,
-  StableDiffusionAPI,
+  // Structured Tools
+  DALLE3,
   StructuredSD,
-  WolframAlphaAPI,
-  StructuredWolfram,
-  SelfReflectionTool,
-  AzureCognitiveSearch,
   StructuredACS,
-  E2BTools,
-  ChatTool,
-  CodeSherpa,
-  CodeSherpaTools,
-  CodeInterpreter,
-  CodeBrew,
+  GoogleSearchAPI,
+  TraversaalSearch,
+  StructuredWolfram,
+  TavilySearchResults,
+  OpenWeather,
 };
