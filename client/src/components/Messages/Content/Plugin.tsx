@@ -1,28 +1,16 @@
+import { Disclosure, DisclosureButton, DisclosurePanel } from '@headlessui/react';
 import { useCallback, memo, ReactNode } from 'react';
-import type { TResPlugin, TInput } from 'librechat-data-provider';
 import { ChevronDownIcon, LucideProps } from 'lucide-react';
-import { Disclosure } from '@headlessui/react';
-import { useRecoilValue } from 'recoil';
+import type { TResPlugin, TInput } from 'librechat-data-provider';
+import { useGetEndpointsQuery } from '~/data-provider';
+import { useShareContext } from '~/Providers';
+import { cn, formatJSON } from '~/utils';
 import { Spinner } from '~/components';
 import CodeBlock from './CodeBlock';
-import { cn } from '~/utils/';
-import store from '~/store';
-
-type PluginsMap = {
-  [pluginKey: string]: string;
-};
 
 type PluginIconProps = LucideProps & {
   className?: string;
 };
-
-function formatJSON(json: string) {
-  try {
-    return JSON.stringify(JSON.parse(json), null, 2);
-  } catch (e) {
-    return json;
-  }
-}
 
 function formatInputs(inputs: TInput[]) {
   let output = '';
@@ -44,7 +32,11 @@ type PluginProps = {
 };
 
 const Plugin: React.FC<PluginProps> = ({ plugin }) => {
-  const plugins: PluginsMap = useRecoilValue(store.plugins);
+  const { isSharedConvo } = useShareContext();
+  const { data: plugins = {} } = useGetEndpointsQuery({
+    enabled: !isSharedConvo,
+    select: (data) => data?.gptPlugins?.plugins,
+  });
 
   const getPluginName = useCallback(
     (pluginKey: string) => {
@@ -86,7 +78,7 @@ const Plugin: React.FC<PluginProps> = ({ plugin }) => {
   };
 
   return (
-    <div className="flex flex-col items-start">
+    <div className="my-2 flex flex-col items-start">
       <Disclosure>
         {({ open }) => {
           const iconProps: PluginIconProps = {
@@ -97,7 +89,7 @@ const Plugin: React.FC<PluginProps> = ({ plugin }) => {
               <div
                 className={cn(
                   plugin.loading ? 'bg-green-100' : 'bg-gray-20',
-                  'flex items-center rounded p-3 text-xs text-gray-900',
+                  'my-1 flex items-center rounded p-3 text-xs text-gray-800',
                 )}
               >
                 <div>
@@ -105,15 +97,15 @@ const Plugin: React.FC<PluginProps> = ({ plugin }) => {
                     <div>{generateStatus()}</div>
                   </div>
                 </div>
-                {plugin.loading && <Spinner className="ml-1" />}
-                <Disclosure.Button className="ml-12 flex items-center gap-2">
+                {plugin.loading && <Spinner className="ml-1 text-black" />}
+                <DisclosureButton className="ml-12 flex items-center gap-2">
                   <ChevronDownIcon {...iconProps} />
-                </Disclosure.Button>
+                </DisclosureButton>
               </div>
 
-              <Disclosure.Panel className="my-3 flex max-w-full flex-col gap-3">
+              <DisclosurePanel className="mt-3 flex max-w-full flex-col gap-3">
                 <CodeBlock
-                  lang={latestPlugin ? `REQUEST TO ${latestPlugin?.toUpperCase()}` : 'REQUEST'}
+                  lang={latestPlugin ? `REQUEST TO ${latestPlugin.toUpperCase()}` : 'REQUEST'}
                   codeChildren={formatInputs(plugin.inputs ?? [])}
                   plugin={true}
                   classProp="max-h-[450px]"
@@ -121,14 +113,14 @@ const Plugin: React.FC<PluginProps> = ({ plugin }) => {
                 {plugin.outputs && plugin.outputs.length > 0 && (
                   <CodeBlock
                     lang={
-                      latestPlugin ? `RESPONSE FROM ${latestPlugin?.toUpperCase()}` : 'RESPONSE'
+                      latestPlugin ? `RESPONSE FROM ${latestPlugin.toUpperCase()}` : 'RESPONSE'
                     }
                     codeChildren={formatJSON(plugin.outputs ?? '')}
                     plugin={true}
                     classProp="max-h-[450px]"
                   />
                 )}
-              </Disclosure.Panel>
+              </DisclosurePanel>
             </>
           );
         }}

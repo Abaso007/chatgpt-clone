@@ -18,36 +18,27 @@ const convoSchema = mongoose.Schema(
     user: {
       type: String,
       index: true,
-      default: null,
     },
     messages: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Message' }],
     // google only
-    examples: [{ type: mongoose.Schema.Types.Mixed }],
+    examples: { type: [{ type: mongoose.Schema.Types.Mixed }], default: undefined },
     agentOptions: {
       type: mongoose.Schema.Types.Mixed,
-      default: null,
     },
     ...conversationPreset,
-    // for bingAI only
-    bingConversationId: {
+    agent_id: {
       type: String,
-      default: null,
     },
-    jailbreakConversationId: {
-      type: String,
-      default: null,
+    tags: {
+      type: [String],
+      default: [],
+      meiliIndex: true,
     },
-    conversationSignature: {
-      type: String,
-      default: null,
+    files: {
+      type: [String],
     },
-    clientId: {
-      type: String,
-      default: null,
-    },
-    invocationId: {
-      type: Number,
-      default: 1,
+    expiredAt: {
+      type: Date,
     },
   },
   { timestamps: true },
@@ -62,7 +53,10 @@ if (process.env.MEILI_HOST && process.env.MEILI_MASTER_KEY) {
   });
 }
 
-convoSchema.index({ createdAt: 1 });
+// Create TTL index
+convoSchema.index({ expiredAt: 1 }, { expireAfterSeconds: 0 });
+convoSchema.index({ createdAt: 1, updatedAt: 1 });
+convoSchema.index({ conversationId: 1, user: 1 }, { unique: true });
 
 const Conversation = mongoose.models.Conversation || mongoose.model('Conversation', convoSchema);
 

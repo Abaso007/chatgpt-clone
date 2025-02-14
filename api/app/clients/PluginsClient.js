@@ -1,11 +1,16 @@
 const OpenAIClient = require('./OpenAIClient');
-const { CallbackManager } = require('langchain/callbacks');
-const { HumanChatMessage, AIChatMessage } = require('langchain/schema');
-const { initializeCustomAgent, initializeFunctionsAgent } = require('./agents');
+const { CallbackManager } = require('@langchain/core/callbacks/manager');
+const { BufferMemory, ChatMessageHistory } = require('langchain/memory');
 const { addImages, buildErrorInput, buildPromptPrefix } = require('./output_parsers');
-const { SelfReflectionTool } = require('./tools');
+const { initializeCustomAgent, initializeFunctionsAgent } = require('./agents');
+const { processFileURL } = require('~/server/services/Files/process');
+const { EModelEndpoint } = require('librechat-data-provider');
+const { formatLangChainMessages } = require('./prompts');
+const checkBalance = require('~/models/checkBalance');
+const { isEnabled } = require('~/server/utils');
+const { extractBaseURL } = require('~/utils');
 const { loadTools } = require('./tools/util');
-const { createLLM } = require('./llm');
+const { logger } = require('~/config');
 
 class PluginsClient extends OpenAIClient {
   constructor(apiKey, options = {}) {
@@ -25,23 +30,25 @@ class PluginsClient extends OpenAIClient {
 
     super.setOptions(options);
 
-    if (this.functionsAgent && this.agentOptions.model && !this.useOpenRouter) {
-      this.agentOptions.model = this.getFunctionModelName(this.agentOptions.model);
-    }
-
     this.isGpt3 = this.modelOptions?.model?.includes('gpt-3');
 
     if (this.options.reverseProxyUrl) {
-      this.langchainProxy = this.options.reverseProxyUrl.match(/.*v1/)[0];
+      this.langchainProxy = extractBaseURL(this.options.reverseProxyUrl);
     }
   }
 
   getSaveOptions() {
     return {
+      artifacts: this.options.artifacts,
       chatGptLabel: this.options.chatGptLabel,
+      modelLabel: this.options.modelLabel,
       promptPrefix: this.options.promptPrefix,
+      tools: this.options.tools,
       ...this.modelOptions,
       agentOptions: this.agentOptions,
+      iconURL: this.options.iconURL,
+      greeting: this.options.greeting,
+      spec: this.options.spec,
     };
   }
 
@@ -50,9 +57,11 @@ class PluginsClient extends OpenAIClient {
   }
 
   getFunctionModelName(input) {
-    if (input.startsWith('gpt-3.5-turbo')) {
+    if (/-(?!0314)\d{4}/.test(input)) {
+      return input;
+    } else if (input.includes('gpt-3.5-turbo')) {
       return 'gpt-3.5-turbo';
-    } else if (input.startsWith('gpt-4')) {
+    } else if (input.includes('gpt-4')) {
       return 'gpt-4';
     } else {
       return 'gpt-3.5-turbo';
@@ -73,92 +82,85 @@ class PluginsClient extends OpenAIClient {
       temperature: this.agentOptions.temperature,
     };
 
-    const configOptions = {};
-
-    if (this.langchainProxy) {
-      configOptions.basePath = this.langchainProxy;
-    }
-
-    if (this.useOpenRouter) {
-      configOptions.basePath = 'https://openrouter.ai/api/v1';
-      configOptions.baseOptions = {
-        headers: {
-          'HTTP-Referer': 'https://librechat.ai',
-          'X-Title': 'LibreChat',
-        },
-      };
-    }
-
-    const model = createLLM({
-      modelOptions,
-      configOptions,
-      openAIApiKey: this.openAIApiKey,
-      azure: this.azure,
+    const model = this.initializeLLM({
+      ...modelOptions,
+      context: 'plugins',
+      initialMessageCount: this.currentMessages.length + 1,
     });
 
-    if (this.options.debug) {
-      console.debug(
-        `<-----Agent Model: ${model.modelName} | Temp: ${model.temperature} | Functions: ${this.functionsAgent}----->`,
-      );
-    }
+    logger.debug(
+      `[PluginsClient] Agent Model: ${model.modelName} | Temp: ${model.temperature} | Functions: ${this.functionsAgent}`,
+    );
 
-    this.tools = await loadTools({
+    // Map Messages to Langchain format
+    const pastMessages = formatLangChainMessages(this.currentMessages.slice(0, -1), {
+      userName: this.options?.name,
+    });
+    logger.debug('[PluginsClient] pastMessages: ' + pastMessages.length);
+
+    // TODO: use readOnly memory, TokenBufferMemory? (both unavailable in LangChainJS)
+    const memory = new BufferMemory({
+      llm: model,
+      chatHistory: new ChatMessageHistory(pastMessages),
+    });
+
+    const { loadedTools } = await loadTools({
       user,
       model,
       tools: this.options.tools,
       functions: this.functionsAgent,
       options: {
+        memory,
+        signal: this.abortController.signal,
         openAIApiKey: this.openAIApiKey,
         conversationId: this.conversationId,
-        debug: this.options?.debug,
+        fileStrategy: this.options.req.app.locals.fileStrategy,
+        processFileURL,
         message,
       },
+      useSpecs: true,
     });
 
-    if (this.tools.length > 0 && !this.functionsAgent) {
-      this.tools.push(new SelfReflectionTool({ message, isGpt3: false }));
-    } else if (this.tools.length === 0) {
+    if (loadedTools.length === 0) {
       return;
     }
 
-    if (this.options.debug) {
-      console.debug('Requested Tools');
-      console.debug(this.options.tools);
-      console.debug('Loaded Tools');
-      console.debug(this.tools.map((tool) => tool.name));
-    }
+    this.tools = loadedTools;
+
+    logger.debug('[PluginsClient] Requested Tools', this.options.tools);
+    logger.debug(
+      '[PluginsClient] Loaded Tools',
+      this.tools.map((tool) => tool.name),
+    );
 
     const handleAction = (action, runId, callback = null) => {
       this.saveLatestAction(action);
 
-      if (this.options.debug) {
-        console.debug('Latest Agent Action ', this.actions[this.actions.length - 1]);
-      }
+      logger.debug('[PluginsClient] Latest Agent Action ', this.actions[this.actions.length - 1]);
 
       if (typeof callback === 'function') {
         callback(action, runId);
       }
     };
 
-    // Map Messages to Langchain format
-    const pastMessages = this.currentMessages
-      .slice(0, -1)
-      .map((msg) =>
-        msg?.isCreatedByUser || msg?.role?.toLowerCase() === 'user'
-          ? new HumanChatMessage(msg.text)
-          : new AIChatMessage(msg.text),
-      );
-
     // initialize agent
     const initializer = this.functionsAgent ? initializeFunctionsAgent : initializeCustomAgent;
+
+    let customInstructions = (this.options.promptPrefix ?? '').trim();
+    if (typeof this.options.artifactsPrompt === 'string' && this.options.artifactsPrompt) {
+      customInstructions = `${customInstructions ?? ''}\n${this.options.artifactsPrompt}`.trim();
+    }
+
     this.executor = await initializer({
       model,
       signal,
       pastMessages,
       tools: this.tools,
-      currentDateString: this.currentDateString,
+      customInstructions,
       verbose: this.options.debug,
       returnIntermediateSteps: true,
+      customName: this.options.chatGptLabel,
+      currentDateString: this.currentDateString,
       callbackManager: CallbackManager.fromHandlers({
         async handleAgentAction(action, runId) {
           handleAction(action, runId, onAgentAction);
@@ -171,9 +173,7 @@ class PluginsClient extends OpenAIClient {
       }),
     });
 
-    if (this.options.debug) {
-      console.debug('Loaded agent.');
-    }
+    logger.debug('[PluginsClient] Loaded agent.');
   }
 
   async executorCall(message, { signal, stream, onToolStart, onToolEnd }) {
@@ -189,12 +189,10 @@ class PluginsClient extends OpenAIClient {
       });
       const input = attempts > 1 ? errorInput : message;
 
-      if (this.options.debug) {
-        console.debug(`Attempt ${attempts} of ${maxAttempts}`);
-      }
+      logger.debug(`[PluginsClient] Attempt ${attempts} of ${maxAttempts}`);
 
-      if (this.options.debug && errorMessage.length > 0) {
-        console.debug('Caught error, input:', input);
+      if (errorMessage.length > 0) {
+        logger.debug('[PluginsClient] Caught error, input: ' + JSON.stringify(input));
       }
 
       try {
@@ -217,44 +215,71 @@ class PluginsClient extends OpenAIClient {
         ]);
         break; // Exit the loop if the function call is successful
       } catch (err) {
-        console.error(err);
-        errorMessage = err.message;
-        let content = '';
-        if (content) {
-          errorMessage = content;
-          break;
-        }
+        logger.error('[PluginsClient] executorCall error:', err);
         if (attempts === maxAttempts) {
-          this.result.output = `Encountered an error while attempting to respond. Error: ${err.message}`;
+          const { run } = this.runManager.getRunByConversationId(this.conversationId);
+          const defaultOutput = `Encountered an error while attempting to respond: ${err.message}`;
+          this.result.output = run && run.error ? run.error : defaultOutput;
+          this.result.errorMessage = run && run.error ? run.error : err.message;
           this.result.intermediateSteps = this.actions;
-          this.result.errorMessage = errorMessage;
           break;
         }
       }
     }
   }
 
+  /**
+   *
+   * @param {TMessage} responseMessage
+   * @param {Partial<TMessage>} saveOptions
+   * @param {string} user
+   * @returns
+   */
   async handleResponseMessage(responseMessage, saveOptions, user) {
-    responseMessage.tokenCount = this.getTokenCountForResponse(responseMessage);
-    responseMessage.completionTokens = responseMessage.tokenCount;
-    await this.saveMessageToDatabase(responseMessage, saveOptions, user);
+    const { output, errorMessage, ...result } = this.result;
+    logger.debug('[PluginsClient][handleResponseMessage] Output:', {
+      output,
+      errorMessage,
+      ...result,
+    });
+    const { error } = responseMessage;
+    if (!error) {
+      responseMessage.tokenCount = this.getTokenCountForResponse(responseMessage);
+      responseMessage.completionTokens = this.getTokenCount(responseMessage.text);
+    }
+
+    // Record usage only when completion is skipped as it is already recorded in the agent phase.
+    if (!this.agentOptions.skipCompletion && !error) {
+      await this.recordTokenUsage(responseMessage);
+    }
+
+    this.responsePromise = this.saveMessageToDatabase(responseMessage, saveOptions, user);
     delete responseMessage.tokenCount;
-    return { ...responseMessage, ...this.result };
+    return { ...responseMessage, ...result };
   }
 
   async sendMessage(message, opts = {}) {
+    /** @type {{ filteredTools: string[], includedTools: string[] }} */
+    const { filteredTools = [], includedTools = [] } = this.options.req.app.locals;
+
+    if (includedTools.length > 0) {
+      const tools = this.options.tools.filter((plugin) => includedTools.includes(plugin));
+      this.options.tools = tools;
+    } else {
+      const tools = this.options.tools.filter((plugin) => !filteredTools.includes(plugin));
+      this.options.tools = tools;
+    }
+
     // If a message is edited, no tools can be used.
     const completionMode = this.options.tools.length === 0 || opts.isEdited;
     if (completionMode) {
       this.setOptions(opts);
       return super.sendMessage(message, opts);
     }
-    if (this.options.debug) {
-      console.log('Plugins sendMessage', message, opts);
-    }
+
+    logger.debug('[PluginsClient] sendMessage', { userMessageText: message, opts });
     const {
       user,
-      isEdited,
       conversationId,
       responseMessageId,
       saveOptions,
@@ -265,14 +290,20 @@ class PluginsClient extends OpenAIClient {
       onToolEnd,
     } = await this.handleStartMethods(message, opts);
 
-    this.conversationId = conversationId;
+    if (opts.progressCallback) {
+      opts.onProgress = opts.progressCallback.call(null, {
+        ...(opts.progressOptions ?? {}),
+        parentMessageId: userMessage.messageId,
+        messageId: responseMessageId,
+      });
+    }
+
     this.currentMessages.push(userMessage);
 
     let {
       prompt: payload,
       tokenCountMap,
       promptTokens,
-      messages,
     } = await this.buildMessages(
       this.currentMessages,
       userMessage.messageId,
@@ -283,30 +314,50 @@ class PluginsClient extends OpenAIClient {
     );
 
     if (tokenCountMap) {
-      console.dir(tokenCountMap, { depth: null });
+      logger.debug('[PluginsClient] tokenCountMap', { tokenCountMap });
       if (tokenCountMap[userMessage.messageId]) {
         userMessage.tokenCount = tokenCountMap[userMessage.messageId];
-        console.log('userMessage.tokenCount', userMessage.tokenCount);
+        logger.debug('[PluginsClient] userMessage.tokenCount', userMessage.tokenCount);
       }
-      payload = payload.map((message) => {
-        const messageWithoutTokenCount = message;
-        delete messageWithoutTokenCount.tokenCount;
-        return messageWithoutTokenCount;
-      });
       this.handleTokenCountMap(tokenCountMap);
     }
 
     this.result = {};
-    if (messages) {
-      this.currentMessages = messages;
+    if (payload) {
+      this.currentMessages = payload;
     }
-    await this.saveMessageToDatabase(userMessage, saveOptions, user);
+
+    if (!this.skipSaveUserMessage) {
+      this.userMessagePromise = this.saveMessageToDatabase(userMessage, saveOptions, user);
+      if (typeof opts?.getReqData === 'function') {
+        opts.getReqData({
+          userMessagePromise: this.userMessagePromise,
+        });
+      }
+    }
+
+    if (isEnabled(process.env.CHECK_BALANCE)) {
+      await checkBalance({
+        req: this.options.req,
+        res: this.options.res,
+        txData: {
+          user: this.user,
+          tokenType: 'prompt',
+          amount: promptTokens,
+          debug: this.options.debug,
+          model: this.modelOptions.model,
+          endpoint: EModelEndpoint.openAI,
+        },
+      });
+    }
+
     const responseMessage = {
+      endpoint: EModelEndpoint.gptPlugins,
+      iconURL: this.options.iconURL,
       messageId: responseMessageId,
       conversationId,
       parentMessageId: userMessage.messageId,
       isCreatedByUser: false,
-      isEdited,
       model: this.modelOptions.model,
       sender: this.sender,
       promptTokens,
@@ -337,11 +388,19 @@ class PluginsClient extends OpenAIClient {
       return await this.handleResponseMessage(responseMessage, saveOptions, user);
     }
 
+    // If error occurred during generation (likely token_balance)
+    if (this.result?.errorMessage?.length > 0) {
+      responseMessage.error = true;
+      responseMessage.text = this.result.output;
+      return await this.handleResponseMessage(responseMessage, saveOptions, user);
+    }
+
     if (this.agentOptions.skipCompletion && this.result.output && this.functionsAgent) {
       const partialText = opts.getPartialText();
       const trimmedPartial = opts.getPartialText().replaceAll(':::plugin:::\n', '');
       responseMessage.text =
         trimmedPartial.length === 0 ? `${partialText}${this.result.output}` : partialText;
+      addImages(this.result.intermediateSteps, responseMessage);
       await this.generateTextStream(this.result.output, opts.onProgress, { delay: 5 });
       return await this.handleResponseMessage(responseMessage, saveOptions, user);
     }
@@ -353,10 +412,7 @@ class PluginsClient extends OpenAIClient {
       return await this.handleResponseMessage(responseMessage, saveOptions, user);
     }
 
-    if (this.options.debug) {
-      console.debug('Plugins completion phase: this.result');
-      console.debug(this.result);
-    }
+    logger.debug('[PluginsClient] Completion phase: this.result', this.result);
 
     const promptPrefix = buildPromptPrefix({
       result: this.result,
@@ -364,28 +420,20 @@ class PluginsClient extends OpenAIClient {
       functionsAgent: this.functionsAgent,
     });
 
-    if (this.options.debug) {
-      console.debug('Plugins: promptPrefix');
-      console.debug(promptPrefix);
-    }
+    logger.debug('[PluginsClient]', { promptPrefix });
 
     payload = await this.buildCompletionPrompt({
       messages: this.currentMessages,
       promptPrefix,
     });
 
-    if (this.options.debug) {
-      console.debug('buildCompletionPrompt Payload');
-      console.debug(payload);
-    }
+    logger.debug('[PluginsClient] buildCompletionPrompt Payload', payload);
     responseMessage.text = await this.sendCompletion(payload, opts);
     return await this.handleResponseMessage(responseMessage, saveOptions, user);
   }
 
   async buildCompletionPrompt({ messages, promptPrefix: _promptPrefix }) {
-    if (this.options.debug) {
-      console.debug('buildCompletionPrompt messages', messages);
-    }
+    logger.debug('[PluginsClient] buildCompletionPrompt messages', messages);
 
     const orderedMessages = messages;
     let promptPrefix = _promptPrefix.trim();
@@ -398,7 +446,6 @@ class PluginsClient extends OpenAIClient {
 
     const instructionsPayload = {
       role: 'system',
-      name: 'instructions',
       content: promptPrefix,
     };
 
@@ -431,7 +478,9 @@ class PluginsClient extends OpenAIClient {
         const message = orderedMessages.pop();
         const isCreatedByUser = message.isCreatedByUser || message.role?.toLowerCase() === 'user';
         const roleLabel = isCreatedByUser ? this.userLabel : this.chatGptLabel;
-        let messageString = `${this.startToken}${roleLabel}:\n${message.text}${this.endToken}\n`;
+        let messageString = `${this.startToken}${roleLabel}:\n${
+          message.text ?? message.content ?? ''
+        }${this.endToken}\n`;
         let newPromptBody = `${messageString}${promptBody}`;
 
         const tokenCountForMessage = this.getTokenCount(messageString);

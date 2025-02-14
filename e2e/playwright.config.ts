@@ -62,8 +62,9 @@ export default defineConfig({
     reuseExistingServer: true,
     env: {
       ...process.env,
+      NODE_ENV: 'CI',
+      EMAIL_HOST: '',
       SEARCH: 'false',
-      NODE_ENV: 'development',
       SESSION_EXPIRY: '60000',
       ALLOW_REGISTRATION: 'true',
       REFRESH_TOKEN_EXPIRY: '300000',

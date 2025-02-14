@@ -1,21 +1,11 @@
 import { useRecoilValue } from 'recoil';
-import { OpenAISettings, BingAISettings, AnthropicSettings } from './Settings';
-import { GoogleSettings, PluginsSettings } from './Settings/MultiView';
-import type { TSettingsProps, TModelSelectProps, TBaseSettingsProps, TModels } from '~/common';
-import { cn } from '~/utils';
+import { SettingsViews, TConversation } from 'librechat-data-provider';
+import { useGetModelsQuery } from 'librechat-data-provider/react-query';
+import type { TSettingsProps } from '~/common';
+import { useGetEndpointsQuery } from '~/data-provider';
+import { cn, getEndpointField } from '~/utils';
+import { getSettings } from './Settings';
 import store from '~/store';
-
-const optionComponents: { [key: string]: React.FC<TModelSelectProps> } = {
-  openAI: OpenAISettings,
-  azureOpenAI: OpenAISettings,
-  bingAI: BingAISettings,
-  anthropic: AnthropicSettings,
-};
-
-const multiViewComponents: { [key: string]: React.FC<TBaseSettingsProps & TModels> } = {
-  google: GoogleSettings,
-  gptPlugins: PluginsSettings,
-};
 
 export default function Settings({
   conversation,
@@ -23,18 +13,23 @@ export default function Settings({
   isPreset = false,
   className = '',
 }: TSettingsProps) {
-  const modelsConfig = useRecoilValue(store.modelsConfig);
-  if (!conversation?.endpoint) {
+  const modelsQuery = useGetModelsQuery();
+  const { data: endpointsConfig } = useGetEndpointsQuery();
+  const currentSettingsView = useRecoilValue(store.currentSettingsView);
+  const endpointType = getEndpointField(endpointsConfig, conversation?.endpoint ?? '', 'type');
+  const endpoint = endpointType ?? conversation?.endpoint ?? '';
+  if (!endpoint || currentSettingsView !== SettingsViews.default) {
     return null;
   }
 
-  const { endpoint } = conversation;
-  const models = modelsConfig?.[endpoint] ?? [];
-  const OptionComponent = optionComponents[endpoint];
+  const { settings, multiViewSettings } = getSettings();
+  const { endpoint: _endpoint } = conversation as TConversation;
+  const models = modelsQuery.data?.[_endpoint ?? ''] ?? [];
+  const OptionComponent = settings[endpoint];
 
   if (OptionComponent) {
     return (
-      <div className={cn('h-[480px] overflow-y-auto md:mb-2 md:h-[350px]', className)}>
+      <div className={cn('h-[500px] overflow-y-auto md:mb-2 md:h-[350px]', className)}>
         <OptionComponent
           conversation={conversation}
           setOption={setOption}
@@ -45,14 +40,14 @@ export default function Settings({
     );
   }
 
-  const MultiViewComponent = multiViewComponents[endpoint];
+  const MultiViewComponent = multiViewSettings[endpoint];
 
-  if (!MultiViewComponent) {
+  if (MultiViewComponent == null) {
     return null;
   }
 
   return (
-    <div className={cn('h-[480px] overflow-y-auto md:mb-2 md:h-[350px]', className)}>
+    <div className={cn('hide-scrollbar h-[500px] overflow-y-auto md:mb-2 md:h-[350px]', className)}>
       <MultiViewComponent conversation={conversation} models={models} isPreset={isPreset} />
     </div>
   );

@@ -1,9 +1,11 @@
-import { render } from 'test/layout-test-utils';
+import { render, screen, fireEvent } from 'test/layout-test-utils';
 import PluginStoreDialog from '../PluginStoreDialog';
 import userEvent from '@testing-library/user-event';
-import * as mockDataProvider from 'librechat-data-provider';
+import * as mockDataProvider from 'librechat-data-provider/react-query';
+import * as authMutations from '~/data-provider/Auth/mutations';
+import * as authQueries from '~/data-provider/Auth/queries';
 
-jest.mock('librechat-data-provider');
+jest.mock('librechat-data-provider/react-query');
 
 class ResizeObserver {
   observe() {
@@ -143,11 +145,11 @@ const setup = ({
     //@ts-ignore - we don't need all parameters of the QueryObserverSuccessResult
     .mockReturnValue(useUpdateUserPluginsMutationReturnValue);
   const mockUseGetUserQuery = jest
-    .spyOn(mockDataProvider, 'useGetUserQuery')
+    .spyOn(authQueries, 'useGetUserQuery')
     //@ts-ignore - we don't need all parameters of the QueryObserverSuccessResult
     .mockReturnValue(useGetUserQueryReturnValue);
   const mockUseRefreshTokenMutation = jest
-    .spyOn(mockDataProvider, 'useRefreshTokenMutation')
+    .spyOn(authMutations, 'useRefreshTokenMutation')
     //@ts-ignore - we don't need all parameters of the QueryObserverSuccessResult
     .mockReturnValue(useRefreshTokenMutationReturnValue);
   const mockSetIsOpen = jest.fn();
@@ -201,4 +203,21 @@ test('allows the user to navigate between pages', async () => {
   expect(getByText('Google')).toBeInTheDocument();
   expect(getByText('Wolfram')).toBeInTheDocument();
   expect(getByText('Plugin 1')).toBeInTheDocument();
+});
+
+test('allows the user to search for plugins', async () => {
+  setup();
+
+  const searchInput = screen.getByPlaceholderText('Search plugins');
+  fireEvent.change(searchInput, { target: { value: 'Google' } });
+
+  expect(screen.getByText('Google')).toBeInTheDocument();
+  expect(screen.queryByText('Wolfram')).not.toBeInTheDocument();
+  expect(screen.queryByText('Plugin 1')).not.toBeInTheDocument();
+
+  fireEvent.change(searchInput, { target: { value: 'Plugin 1' } });
+
+  expect(screen.getByText('Plugin 1')).toBeInTheDocument();
+  expect(screen.queryByText('Google')).not.toBeInTheDocument();
+  expect(screen.queryByText('Wolfram')).not.toBeInTheDocument();
 });

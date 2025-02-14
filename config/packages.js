@@ -1,6 +1,6 @@
-const { execSync } = require('child_process');
-const path = require('path');
 const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
 
 const { deleteNodeModules } = require('./helpers');
 
@@ -9,6 +9,7 @@ const rootDir = path.resolve(__dirname, '..');
 const directories = [
   rootDir,
   path.resolve(rootDir, 'packages', 'data-provider'),
+  path.resolve(rootDir, 'packages', 'mcp'),
   path.resolve(rootDir, 'client'),
   path.resolve(rootDir, 'api'),
 ];

@@ -1,154 +1,174 @@
 const conversationPreset = {
-  // endpoint: [azureOpenAI, openAI, bingAI, anthropic, chatGPTBrowser]
+  // endpoint: [azureOpenAI, openAI, anthropic, chatGPTBrowser]
   endpoint: {
     type: String,
     default: null,
     required: true,
   },
+  endpointType: {
+    type: String,
+  },
   // for azureOpenAI, openAI, chatGPTBrowser only
   model: {
     type: String,
-    default: null,
+    required: false,
+  },
+  // for bedrock only
+  region: {
+    type: String,
     required: false,
   },
   // for azureOpenAI, openAI only
   chatGptLabel: {
     type: String,
-    default: null,
     required: false,
   },
   // for google only
   modelLabel: {
     type: String,
-    default: null,
     required: false,
   },
   promptPrefix: {
     type: String,
-    default: null,
     required: false,
   },
   temperature: {
     type: Number,
-    default: 1,
     required: false,
   },
   top_p: {
     type: Number,
-    default: 1,
     required: false,
   },
   // for google only
   topP: {
     type: Number,
-    default: 0.95,
     required: false,
   },
   topK: {
     type: Number,
-    default: 40,
     required: false,
   },
   maxOutputTokens: {
     type: Number,
-    default: 1024,
     required: false,
   },
   presence_penalty: {
     type: Number,
-    default: 0,
     required: false,
   },
   frequency_penalty: {
     type: Number,
-    default: 0,
     required: false,
   },
-  // for bingai only
-  jailbreak: {
+  file_ids: { type: [{ type: String }], default: undefined },
+  // deprecated
+  resendImages: {
+    type: Boolean,
+  },
+  /* Anthropic only */
+  promptCache: {
+    type: Boolean,
+  },
+  system: {
+    type: String,
+  },
+  // files
+  resendFiles: {
+    type: Boolean,
+  },
+  imageDetail: {
+    type: String,
+  },
+  /* agents */
+  agent_id: {
+    type: String,
+  },
+  /* assistants */
+  assistant_id: {
+    type: String,
+  },
+  instructions: {
+    type: String,
+  },
+  stop: { type: [{ type: String }], default: undefined },
+  isArchived: {
     type: Boolean,
     default: false,
   },
-  context: {
+  /* UI Components */
+  iconURL: {
     type: String,
-    default: null,
   },
-  systemMessage: {
+  greeting: {
     type: String,
-    default: null,
   },
-  toneStyle: {
+  spec: {
     type: String,
-    default: null,
+  },
+  tags: {
+    type: [String],
+    default: [],
+  },
+  tools: { type: [{ type: String }], default: undefined },
+  maxContextTokens: {
+    type: Number,
+  },
+  max_tokens: {
+    type: Number,
+  },
+  /** omni models only */
+  reasoning_effort: {
+    type: String,
   },
 };
 
 const agentOptions = {
   model: {
     type: String,
-    default: null,
     required: false,
   },
   // for azureOpenAI, openAI only
   chatGptLabel: {
     type: String,
-    default: null,
     required: false,
   },
-  // for google only
   modelLabel: {
     type: String,
-    default: null,
     required: false,
   },
   promptPrefix: {
     type: String,
-    default: null,
     required: false,
   },
   temperature: {
     type: Number,
-    default: 1,
     required: false,
   },
   top_p: {
     type: Number,
-    default: 1,
     required: false,
   },
   // for google only
   topP: {
     type: Number,
-    default: 0.95,
     required: false,
   },
   topK: {
     type: Number,
-    default: 40,
     required: false,
   },
   maxOutputTokens: {
     type: Number,
-    default: 1024,
     required: false,
   },
   presence_penalty: {
     type: Number,
-    default: 0,
     required: false,
   },
   frequency_penalty: {
     type: Number,
-    default: 0,
     required: false,
-  },
-  context: {
-    type: String,
-    default: null,
-  },
-  systemMessage: {
-    type: String,
-    default: null,
   },
 };
 
